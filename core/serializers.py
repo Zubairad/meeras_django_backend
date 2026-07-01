@@ -80,11 +80,12 @@ class BroadcastSerializer(serializers.ModelSerializer):
 
 class ChatSerializer(serializers.ModelSerializer):
     sender_username = serializers.CharField(source='sender.username', read_only=True)
+    sender_role = serializers.CharField(source='sender.role', read_only=True)
 
     class Meta:
         model = ChatMessage
         fields = '__all__'
-        read_only_fields = ('id', 'timestamp', 'sender')
+        read_only_fields = ('id', 'timestamp', 'sender', 'is_verified')
 
     def create(self, validated_data):
         validated_data['sender'] = self.context['request'].user

@@ -2,9 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'providers/auth_provider.dart';
 import 'screens/login_screen.dart';
-import 'screens/home_screen.dart';
+import 'screens/register_screen.dart';
 import 'screens/help_requests_screen.dart';
 import 'screens/inventory_screen.dart';
+import 'screens/admin_moderation_screen.dart';
 import 'theme/meeras_theme.dart';
 import 'widgets/main_scaffold.dart';
 
@@ -29,9 +30,11 @@ class MeerasApp extends StatelessWidget {
       home: const _AuthGate(),
       routes: {
         '/login': (_) => const LoginScreen(),
+        '/register': (_) => const RegisterScreen(),
         '/home': (_) => const MainScaffold(),
         '/help-requests': (_) => const HelpRequestsScreen(),
         '/inventory': (_) => const InventoryScreen(),
+        '/admin/moderation': (_) => const AdminModerationScreen(),
       },
     );
   }
@@ -54,10 +57,12 @@ class _AuthGateState extends State<_AuthGate> {
 
   Future<void> _check() async {
     final auth = context.read<AuthProvider>();
-    final token = await auth.fetchMe().then((_) => auth.isLoggedIn).catchError((_) => false);
+    try {
+      await auth.fetchMe();
+    } catch (_) {}
     if (mounted) {
       setState(() => _checked = true);
-      if (token) {
+      if (auth.isLoggedIn) {
         Navigator.pushReplacementNamed(context, '/home');
       }
     }
@@ -72,9 +77,11 @@ class _AuthGateState extends State<_AuthGate> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.volunteer_activism, color: MeerasTheme.accent, size: 48),
+              Icon(Icons.volunteer_activism,
+                  color: MeerasTheme.accent, size: 48),
               SizedBox(height: 16),
-              CircularProgressIndicator(color: MeerasTheme.accent, strokeWidth: 2),
+              CircularProgressIndicator(
+                  color: MeerasTheme.accent, strokeWidth: 2),
             ],
           ),
         ),
