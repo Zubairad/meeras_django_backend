@@ -37,7 +37,7 @@ class MeerasTheme {
       ),
       iconTheme: IconThemeData(color: textPrimary),
     ),
-    cardTheme: CardTheme(
+    cardTheme: CardThemeData(
       color: cardBg,
       elevation: 0,
       shape: RoundedRectangleBorder(

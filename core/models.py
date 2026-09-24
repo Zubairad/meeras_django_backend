@@ -107,6 +107,9 @@ class ChatMessage(models.Model):
     )
     message = models.TextField()
     timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+    is_verified = models.BooleanField(default=False)
+    is_flagged = models.BooleanField(default=False)
+    flag_reason = models.CharField(max_length=255, blank=True, null=True)
 
     class Meta:
         ordering = ['timestamp']

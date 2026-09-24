@@ -1,0 +1,40 @@
+# Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+build/
+
+# Android
+.gradle/
+.idea/
+*.iml
+local.properties
+
+# VS Code
+.vscode/
+
+# Django / Python
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Django local files
+db.sqlite3
+db.sqlite3-journal
+
+# Environment variables / secrets
+.env
+.env.*
+
+# Python virtual environments
+env/
+ENV/
+.venv/
+
+# OS files
+.DS_Store
+Thumbs.db

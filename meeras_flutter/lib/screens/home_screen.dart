@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../theme/meeras_theme.dart';
 import '../services/api_service.dart';
+import '../services/disaster_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -12,23 +14,52 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   List _broadcasts = [];
-  List _helpRequests = [];
+  List<Earthquake> _earthquakes = [];
   bool _loading = true;
+  bool _disasterLoading = true;
+  Timer? _disasterTimer;
 
   @override
   void initState() {
     super.initState();
     _loadData();
+    _loadDisasters();
+    _disasterTimer = Timer.periodic(
+      const Duration(minutes: 2),
+          (_) => _loadDisasters(),
+    );
+  }
+
+  @override
+  void dispose() {
+    _disasterTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadData() async {
     final br = await ApiService.getBroadcasts();
-    final hr = await ApiService.getHelpRequests();
+    if (!mounted) return;
     setState(() {
       _broadcasts = br['data']['results'] ?? br['data'] ?? [];
-      _helpRequests = hr['data']['results'] ?? hr['data'] ?? [];
       _loading = false;
     });
+  }
+
+  Future<void> _loadDisasters() async {
+    final quakes = await DisasterService.getRecentEarthquakes(limit: 5);
+    if (!mounted) return;
+    setState(() {
+      _earthquakes = quakes;
+      _disasterLoading = false;
+    });
+  }
+
+  Future<void> _refresh() async {
+    setState(() {
+      _loading = true;
+      _disasterLoading = true;
+    });
+    await Future.wait([_loadData(), _loadDisasters()]);
   }
 
   @override
@@ -40,27 +71,32 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: MeerasTheme.bg,
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: _loadData,
+          onRefresh: _refresh,
           color: MeerasTheme.accent,
           backgroundColor: MeerasTheme.surface,
           child: CustomScrollView(
             slivers: [
-              // ── App Bar ──────────────────────────────────────────
+              // ── App Bar ───────────────────────────────────────────
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                   child: Row(
                     children: [
-                      const Icon(Icons.arrow_back_ios, color: MeerasTheme.textPrimary, size: 18),
-                      const Spacer(),
-                      Text('homepage',
-                          style: Theme.of(context).textTheme.titleLarge),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('homepage',
+                              style: Theme.of(context).textTheme.titleLarge),
+                          Text('Welcome, ${user?['username'] ?? ''}',
+                              style: Theme.of(context).textTheme.bodyMedium),
+                        ],
+                      ),
                       const Spacer(),
                       GestureDetector(
                         onTap: () => Navigator.pushNamed(context, '/profile'),
                         child: Container(
                           width: 38, height: 38,
-                          decoration: BoxDecoration(
+                          decoration: const BoxDecoration(
                             color: MeerasTheme.surfaceElevated,
                             shape: BoxShape.circle,
                           ),
@@ -73,7 +109,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
 
-              // ── Location card ────────────────────────────────────
+              // ── Location card ─────────────────────────────────────
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -83,20 +119,28 @@ class _HomeScreenState extends State<HomeScreen> {
 
               const SliverToBoxAdapter(child: SizedBox(height: 16)),
 
-              // ── Quick action pills ───────────────────────────────
+              // ── Quick actions ─────────────────────────────────────
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
-                      _QuickAction(icon: Icons.campaign_outlined, label: 'Alerts',
+                      _QuickAction(
+                          icon: Icons.campaign_outlined,
+                          label: 'Alerts',
                           onTap: () => Navigator.pushNamed(context, '/broadcasts')),
-                      _QuickAction(icon: Icons.handshake_outlined, label: 'Help',
+                      _QuickAction(
+                          icon: Icons.handshake_outlined,
+                          label: 'Help',
                           onTap: () => Navigator.pushNamed(context, '/help-requests')),
-                      _QuickAction(icon: Icons.warning_amber_outlined, label: 'Emergency',
+                      _QuickAction(
+                          icon: Icons.warning_amber_outlined,
+                          label: 'Emergency',
                           onTap: () => _showEmergencyDialog(context)),
-                      _QuickAction(icon: Icons.inventory_2_outlined, label: 'Inventory',
+                      _QuickAction(
+                          icon: Icons.inventory_2_outlined,
+                          label: 'Inventory',
                           onTap: () {
                             if (auth.isNgoAdmin || auth.isSystemAdmin) {
                               Navigator.pushNamed(context, '/inventory');
@@ -111,12 +155,83 @@ class _HomeScreenState extends State<HomeScreen> {
 
               const SliverToBoxAdapter(child: SizedBox(height: 20)),
 
-              // ── Weather forecast ─────────────────────────────────
+              // ── Weather ───────────────────────────────────────────
               const SliverToBoxAdapter(child: _WeatherCard()),
 
               const SliverToBoxAdapter(child: SizedBox(height: 20)),
 
-              // ── Admin panel shortcut (role-gated) ───────────────
+              // ── Live disaster feed header ─────────────────────────
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.crisis_alert,
+                          color: MeerasTheme.danger, size: 18),
+                      const SizedBox(width: 8),
+                      Text('Live Disaster Feed',
+                          style: Theme.of(context).textTheme.titleMedium),
+                      const Spacer(),
+                      if (_disasterLoading)
+                        const SizedBox(
+                          width: 14, height: 14,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: MeerasTheme.accent),
+                        )
+                      else
+                        GestureDetector(
+                          onTap: _loadDisasters,
+                          child: const Icon(Icons.refresh,
+                              color: MeerasTheme.textMuted, size: 18),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SliverToBoxAdapter(child: SizedBox(height: 8)),
+
+              // ── Earthquake cards (horizontal scroll) ──────────────
+              if (_disasterLoading)
+                const SliverToBoxAdapter(child: _DisasterSkeleton())
+              else if (_earthquakes.isEmpty)
+                SliverToBoxAdapter(
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 16),
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: MeerasTheme.surface,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.check_circle_outline,
+                            color: MeerasTheme.success, size: 20),
+                        SizedBox(width: 10),
+                        Text('No significant seismic activity right now',
+                            style: TextStyle(
+                                color: MeerasTheme.textSecondary, fontSize: 13)),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                SliverToBoxAdapter(
+                  child: SizedBox(
+                    height: 148,
+                    child: ListView.builder(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      itemCount: _earthquakes.length,
+                      itemBuilder: (ctx, i) =>
+                          _EarthquakeCard(quake: _earthquakes[i]),
+                    ),
+                  ),
+                ),
+
+              const SliverToBoxAdapter(child: SizedBox(height: 20)),
+
+              // ── Admin banner ──────────────────────────────────────
               if (auth.isNgoAdmin || auth.isSystemAdmin)
                 SliverToBoxAdapter(
                   child: Padding(
@@ -128,7 +243,7 @@ class _HomeScreenState extends State<HomeScreen> {
               if (auth.isNgoAdmin || auth.isSystemAdmin)
                 const SliverToBoxAdapter(child: SizedBox(height: 16)),
 
-              // ── Community posts ──────────────────────────────────
+              // ── Community posts ───────────────────────────────────
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
@@ -141,7 +256,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 const SliverToBoxAdapter(
                   child: Padding(
                     padding: EdgeInsets.all(40),
-                    child: Center(child: CircularProgressIndicator(color: MeerasTheme.accent)),
+                    child: Center(
+                        child: CircularProgressIndicator(color: MeerasTheme.accent)),
                   ),
                 )
               else if (_broadcasts.isEmpty)
@@ -150,7 +266,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     padding: const EdgeInsets.all(32),
                     child: Center(
                       child: Column(children: [
-                        const Icon(Icons.inbox_outlined, color: MeerasTheme.textMuted, size: 40),
+                        const Icon(Icons.inbox_outlined,
+                            color: MeerasTheme.textMuted, size: 40),
                         const SizedBox(height: 8),
                         Text('No broadcasts yet',
                             style: Theme.of(context).textTheme.bodyMedium),
@@ -161,7 +278,7 @@ class _HomeScreenState extends State<HomeScreen> {
               else
                 SliverList(
                   delegate: SliverChildBuilderDelegate(
-                    (ctx, i) => _BroadcastTile(post: _broadcasts[i]),
+                        (ctx, i) => _BroadcastTile(post: _broadcasts[i]),
                     childCount: _broadcasts.length,
                   ),
                 ),
@@ -179,18 +296,18 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (_) => AlertDialog(
         backgroundColor: MeerasTheme.surface,
-        title: const Text('Emergency Alert', style: TextStyle(color: MeerasTheme.danger)),
+        title: const Text('Emergency Alert',
+            style: TextStyle(color: MeerasTheme.danger)),
         content: const Text('Send emergency broadcast to all personnel?',
             style: TextStyle(color: MeerasTheme.textSecondary)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context),
+          TextButton(
+              onPressed: () => Navigator.pop(context),
               child: const Text('Cancel')),
           TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              // TODO: call broadcasts API with priority=emergency
-            },
-            child: const Text('Send', style: TextStyle(color: MeerasTheme.danger)),
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Send',
+                style: TextStyle(color: MeerasTheme.danger)),
           ),
         ],
       ),
@@ -207,7 +324,152 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// ── Sub-widgets ─────────────────────────────────────────────────────────────
+// ── Earthquake card ───────────────────────────────────────────────────────────
+
+class _EarthquakeCard extends StatelessWidget {
+  final Earthquake quake;
+  const _EarthquakeCard({required this.quake});
+
+  Color get _magColor {
+    if (quake.magnitude >= 7.0) return MeerasTheme.danger;
+    if (quake.magnitude >= 5.0) return MeerasTheme.warning;
+    if (quake.magnitude >= 3.0) return const Color(0xFF5B8DEF);
+    return MeerasTheme.success;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 220,
+      margin: const EdgeInsets.only(right: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: MeerasTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _magColor.withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: _magColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'M ${quake.magnitude.toStringAsFixed(1)}',
+                  style: TextStyle(
+                    color: _magColor,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                decoration: BoxDecoration(
+                  color: _magColor.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  quake.severityLabel,
+                  style: TextStyle(
+                      color: _magColor,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            quake.place,
+            style: const TextStyle(
+              color: MeerasTheme.textPrimary,
+              fontSize: 12,
+              fontWeight: FontWeight.w500,
+              height: 1.3,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const Spacer(),
+          Row(
+            children: [
+              if (quake.depth != null) ...[
+                const Icon(Icons.keyboard_arrow_down,
+                    color: MeerasTheme.textMuted, size: 14),
+                Text('${quake.depth!.toStringAsFixed(0)}km',
+                    style: const TextStyle(
+                        color: MeerasTheme.textMuted, fontSize: 11)),
+                const SizedBox(width: 8),
+              ],
+              const Icon(Icons.access_time,
+                  color: MeerasTheme.textMuted, size: 13),
+              const SizedBox(width: 3),
+              Text(quake.timeAgo,
+                  style: const TextStyle(
+                      color: MeerasTheme.textMuted, fontSize: 11)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Skeleton loader ───────────────────────────────────────────────────────────
+
+class _DisasterSkeleton extends StatelessWidget {
+  const _DisasterSkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 148,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: 3,
+        itemBuilder: (_, __) => Container(
+          width: 220,
+          margin: const EdgeInsets.only(right: 12),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: MeerasTheme.surface,
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _bar(80, 26),
+              const SizedBox(height: 12),
+              _bar(double.infinity, 12),
+              const SizedBox(height: 6),
+              _bar(150, 12),
+              const Spacer(),
+              _bar(90, 10),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _bar(double w, double h) => Container(
+    width: w, height: h,
+    decoration: BoxDecoration(
+      color: MeerasTheme.surfaceElevated,
+      borderRadius: BorderRadius.circular(6),
+    ),
+  );
+}
+
+// ── Location card ─────────────────────────────────────────────────────────────
 
 class _LocationCard extends StatelessWidget {
   final Map<String, dynamic>? user;
@@ -242,16 +504,17 @@ class _LocationCard extends StatelessWidget {
                   const Text('Current location',
                       style: TextStyle(color: MeerasTheme.textMuted, fontSize: 11)),
                   Text(user?['location'] ?? 'Unknown location',
-                      style: const TextStyle(color: MeerasTheme.textPrimary,
-                          fontSize: 14, fontWeight: FontWeight.w500)),
+                      style: const TextStyle(
+                          color: MeerasTheme.textPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500)),
                 ],
               ),
             ],
           ),
           const SizedBox(height: 12),
-          // Map placeholder
           Container(
-            height: 120,
+            height: 100,
             decoration: BoxDecoration(
               color: MeerasTheme.surfaceElevated,
               borderRadius: BorderRadius.circular(12),
@@ -262,7 +525,8 @@ class _LocationCard extends StatelessWidget {
                 children: [
                   Icon(Icons.map_outlined, color: MeerasTheme.textMuted, size: 20),
                   SizedBox(width: 8),
-                  Text('Map view', style: TextStyle(color: MeerasTheme.textMuted, fontSize: 13)),
+                  Text('Map view',
+                      style: TextStyle(color: MeerasTheme.textMuted, fontSize: 13)),
                 ],
               ),
             ),
@@ -272,6 +536,8 @@ class _LocationCard extends StatelessWidget {
     );
   }
 }
+
+// ── Quick action ──────────────────────────────────────────────────────────────
 
 class _QuickAction extends StatelessWidget {
   final IconData icon;
@@ -294,12 +560,15 @@ class _QuickAction extends StatelessWidget {
             child: Icon(icon, color: MeerasTheme.textSecondary, size: 22),
           ),
           const SizedBox(height: 6),
-          Text(label, style: const TextStyle(color: MeerasTheme.textMuted, fontSize: 11)),
+          Text(label,
+              style: const TextStyle(color: MeerasTheme.textMuted, fontSize: 11)),
         ],
       ),
     );
   }
 }
+
+// ── Weather card ──────────────────────────────────────────────────────────────
 
 class _WeatherCard extends StatelessWidget {
   const _WeatherCard();
@@ -308,7 +577,6 @@ class _WeatherCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final hours = ['11am', '12pm', '1pm', '2pm', '3pm', '4pm', '5pm'];
     final temps = [22, 24, 25, 26, 25, 24, 22];
-
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16),
       padding: const EdgeInsets.all(16),
@@ -321,21 +589,23 @@ class _WeatherCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Expanded(
+              const Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('weather forecast',
+                    Text('weather forecast',
                         style: TextStyle(color: MeerasTheme.textMuted, fontSize: 12)),
-                    const SizedBox(height: 4),
-                    const Text('Cloudy conditions expected around 11am.',
+                    SizedBox(height: 4),
+                    Text('Cloudy conditions expected around 11am.',
                         style: TextStyle(color: MeerasTheme.textSecondary, fontSize: 12)),
                   ],
                 ),
               ),
               const Text('29',
-                  style: TextStyle(color: MeerasTheme.textPrimary,
-                      fontSize: 36, fontWeight: FontWeight.w700)),
+                  style: TextStyle(
+                      color: MeerasTheme.textPrimary,
+                      fontSize: 36,
+                      fontWeight: FontWeight.w700)),
               const Text('°',
                   style: TextStyle(color: MeerasTheme.accent, fontSize: 24)),
             ],
@@ -343,8 +613,9 @@ class _WeatherCard extends StatelessWidget {
           const SizedBox(height: 14),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: List.generate(hours.length, (i) => Column(
-              children: [
+            children: List.generate(
+              hours.length,
+                  (i) => Column(children: [
                 Text(hours[i],
                     style: const TextStyle(color: MeerasTheme.textMuted, fontSize: 10)),
                 const SizedBox(height: 4),
@@ -354,8 +625,8 @@ class _WeatherCard extends StatelessWidget {
                       fontSize: 12,
                       fontWeight: i == 2 ? FontWeight.w600 : FontWeight.normal,
                     )),
-              ],
-            )),
+              ]),
+            ),
           ),
         ],
       ),
@@ -363,45 +634,50 @@ class _WeatherCard extends StatelessWidget {
   }
 }
 
+// ── Admin banner ──────────────────────────────────────────────────────────────
+
 class _AdminBanner extends StatelessWidget {
   final AuthProvider auth;
   const _AdminBanner({required this.auth});
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => Navigator.pushNamed(context, '/admin'),
-      child: Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: MeerasTheme.accent.withOpacity(0.12),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: MeerasTheme.accent.withOpacity(0.3)),
-        ),
-        child: Row(
-          children: [
-            const Icon(Icons.admin_panel_settings_outlined,
-                color: MeerasTheme.accent, size: 22),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Admin Panel',
-                      style: TextStyle(color: MeerasTheme.accentLight,
-                          fontWeight: FontWeight.w600, fontSize: 14)),
-                  Text('Logged in as ${auth.role}',
-                      style: const TextStyle(color: MeerasTheme.textMuted, fontSize: 12)),
-                ],
-              ),
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: MeerasTheme.accent.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: MeerasTheme.accent.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.admin_panel_settings_outlined,
+              color: MeerasTheme.accent, size: 22),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Admin Panel',
+                    style: TextStyle(
+                        color: MeerasTheme.accentLight,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14)),
+                Text('Logged in as ${auth.role}',
+                    style: const TextStyle(
+                        color: MeerasTheme.textMuted, fontSize: 12)),
+              ],
             ),
-            const Icon(Icons.chevron_right, color: MeerasTheme.textMuted, size: 20),
-          ],
-        ),
+          ),
+          const Icon(Icons.chevron_right,
+              color: MeerasTheme.textMuted, size: 20),
+        ],
       ),
     );
   }
 }
+
+// ── Broadcast tile ────────────────────────────────────────────────────────────
 
 class _BroadcastTile extends StatelessWidget {
   final Map<String, dynamic> post;
@@ -436,16 +712,20 @@ class _BroadcastTile extends StatelessWidget {
                 Row(
                   children: [
                     Text(post['posted_by_username'] ?? 'Unknown',
-                        style: const TextStyle(color: MeerasTheme.textPrimary,
-                            fontWeight: FontWeight.w500, fontSize: 13)),
+                        style: const TextStyle(
+                            color: MeerasTheme.textPrimary,
+                            fontWeight: FontWeight.w500,
+                            fontSize: 13)),
                     const Spacer(),
                     Text(post['created_at'] ?? '',
-                        style: const TextStyle(color: MeerasTheme.textMuted, fontSize: 11)),
+                        style: const TextStyle(
+                            color: MeerasTheme.textMuted, fontSize: 11)),
                   ],
                 ),
                 const SizedBox(height: 4),
                 Text(post['message'] ?? '',
-                    style: const TextStyle(color: MeerasTheme.textSecondary, fontSize: 13)),
+                    style: const TextStyle(
+                        color: MeerasTheme.textSecondary, fontSize: 13)),
               ],
             ),
           ),

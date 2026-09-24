@@ -131,4 +131,41 @@ class ChatViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     filter_backends = [filters.OrderingFilter]
     ordering = ['timestamp']
-    http_method_names = ['get', 'post', 'head', 'options']  # No editing/deleting messages
+    http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
+
+    def destroy(self, request, *args, **kwargs):
+        """Only allow users to delete their own messages."""
+        msg = self.get_object()
+        if msg.sender != request.user:
+            return Response(
+                {'error': 'You can only delete your own messages.'},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().destroy(request, *args, **kwargs)
+
+    @action(detail=True, methods=['patch'], permission_classes=[IsAuthenticated])
+    def flag(self, request, pk=None):
+        """Flag a message as potentially false."""
+        msg = self.get_object()
+        msg.is_flagged = True
+        msg.flag_reason = request.data.get('reason', '')
+        msg.save()
+        return Response(ChatSerializer(msg, context={'request': request}).data)
+
+    @action(detail=True, methods=['patch'], permission_classes=[IsAuthenticated, IsNGOAdmin])
+    def verify(self, request, pk=None):
+        """NGO admin marks a message as verified."""
+        msg = self.get_object()
+        msg.is_verified = True
+        msg.is_flagged = False
+        msg.save()
+        return Response(ChatSerializer(msg, context={'request': request}).data)
+
+    @action(detail=True, methods=['patch'], permission_classes=[IsAuthenticated, IsNGOAdmin])
+    def unflag(self, request, pk=None):
+        """NGO admin removes a flag."""
+        msg = self.get_object()
+        msg.is_flagged = False
+        msg.flag_reason = ''
+        msg.save()
+        return Response(ChatSerializer(msg, context={'request': request}).data)
