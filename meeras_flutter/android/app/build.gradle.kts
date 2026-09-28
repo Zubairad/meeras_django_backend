@@ -8,7 +8,7 @@ plugins {
 android {
     namespace = "com.meeras.meeras_flutter"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = "27.0.12077973"
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -41,4 +41,15 @@ android {
 
 flutter {
     source = "../.."
+}
+
+subprojects {
+    afterEvaluate {
+        val project = this
+        if (project.plugins.hasPlugin("com.android.library")) {
+            project.extensions.findByType<com.android.build.gradle.LibraryExtension>()?.apply {
+                compileSdk = 35
+            }
+        }
+    }
 }
